@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Posts on tales by a geek</title>
+    <link>https://awesomenix.github.io/posts/</link>
+    <description>Recent content in Posts on tales by a geek</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Wed, 10 Jul 2019 21:21:29 -0700</lastBuildDate>
+    
+	<atom:link href="https://awesomenix.github.io/posts/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Tale of etcd upgrade</title>
+      <link>https://awesomenix.github.io/posts/tale-of-etcd-upgrade/</link>
+      <pubDate>Wed, 10 Jul 2019 21:21:29 -0700</pubDate>
+      
+      <guid>https://awesomenix.github.io/posts/tale-of-etcd-upgrade/</guid>
+      <description>This blog post is about how a simple straightforward task never goes according to plan in a distributed system. Always expect the unexpected. I work at Microsoft, Azure Kubernetes team, and was recently asked to investigate upgrading legacy etcd v2(2.2) to v3(3.2). We run a large number of etcd clusters in production, spread across multiple regions, and many clusters are still running v2. Running an N master configuration, you can imagine the complexity of upgrading a large number of etcd instances with zero downtime.</description>
+    </item>
+    
+  </channel>
+</rss>

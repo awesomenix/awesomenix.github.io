@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en-us">
+    <head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+		<title>
+				Tale of etcd upgrade &middot; tales by a geek
+		</title>
+
+		
+  		<link rel="stylesheet" href="/css/style.css">
+		<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Libre+Baskerville:400,400i,700">
+		
+		<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+		<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+		<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+
+		
+		<link href="" rel="alternate" type="application/rss+xml" title="tales by a geek" />
+	</head>
+
+    <body>
+        		<nav class="nav">
+			<div class="nav-container">
+				<a href="/">
+					<h2 class="nav-title">tales by a geek</h2>
+				</a>
+				<ul>
+    <li><a href="/about">About</a></li>
+    <li><a href="/">Posts</a></li>
+</ul>
+			</div>
+		</nav>
+
+        
+
+<main>
+	<div class="post">
+		<div class="post-info">
+    <span>Written by</span>
+        
+        <br>
+        <span>on&nbsp;</span><time datetime="2019-07-10 21:21:29 -0700 PDT">July 10, 2019</time>
+</div>
+		<h1 class="post-title">Tale of etcd upgrade</h1>
+<div class="post-line"></div>
+
+		
+
+		
+
+<p>This blog post is about how a simple straightforward task never goes according to plan in a distributed system. Always expect the unexpected. I work at Microsoft, Azure Kubernetes team, and was recently asked to investigate upgrading legacy etcd v2(2.2) to v3(3.2). We run a large number of etcd clusters in production, spread across multiple regions, and many clusters are still running v2. Running an N master configuration, you can imagine the complexity of upgrading a large number of etcd instances with zero downtime.</p>
+
+<p>Actions performed across the fleet include:</p>
+
+<ul>
+<li>Pre-Monitoring</li>
+<li>Detection</li>
+<li>Testing</li>
+<li>Upgrade</li>
+<li>Post-Monitoring</li>
+</ul>
+
+<h1 id="pre-monitoring">Pre-Monitoring</h1>
+
+<p>Having solid monitoring on our end is the critical piece in any operation performed against production. This includes not just monitoring etcd itself, but also the application depending on etcd (in our case Kubernetes clusters). This also brings confidence in our pre and post upgrade processes.</p>
+
+<h1 id="detection">Detection</h1>
+
+<p>Any upgrade process involves a detection phase:</p>
+
+<ul>
+<li>etcd versions</li>
+<li>etcd backend store, we needed to upgrade from v2 to v3 (mvcc) store (realized at a later point)</li>
+<li>etcd security, making sure it’s using TLS (realized at a later point)
+<br /></li>
+</ul>
+
+<p>Like any other team out there, we didn’t think it was important to log this into our monitoring data. Let’s be honest, it’s something we need to do one-off (at least that’s what we thought initially). No sane engineer would log in to large number of instances and check the running version. One of our engineers in the team had installed and configured rundeck, which can run commands, scripts, perform custom orchestration&hellip;a long list of features(it’s pretty awesome).</p>
+
+<h1 id="testing">Testing</h1>
+
+<p>Being a decent engineer, before starting the complex upgrade process, l begin an extensive research process on upgrade process. Armed with this half-baked knowledge, I set out to test the process on our test etcd cluster which was running 2.2. I successfully upgraded to 2.3 using a simple script run on each machine, because that’s the recommended process.</p>
+
+<ul>
+<li>Check etcd is healthy</li>
+<li>Detect etcd version (if 2.2 upgrade to 2.3)</li>
+<li>Backup v2 store</li>
+<li>Download and replace with 2.3</li>
+<li>Restart etcd</li>
+<li>Check that etcd is healthy</li>
+<li>Wait for two minutes
+<br /></li>
+</ul>
+
+<p>The upgrade process went smoothly, so with rushing over confidence and battle tested scripts I went ahead with upgrade from 2.3 to 3.2. This upgrade ended in disaster (oh! the horror),</p>
+
+<ul>
+<li>etcd would not start</li>
+<li>Always ended up with panic due to missing snap file.</li>
+</ul>
+
+<p>Replacing it with v2.3 or v3.1 didn’t help either. I didn’t try 3.0 since I remembered reading about data corruption <a href="https://github.com/etcd-io/etcd/pull/8813#issuecomment-344158430">issue</a> (it applied only to v3 store). A frantic search led me to known <a href="https://github.com/etcd-io/etcd/issues/9480">issue</a>. After taking a small break, went back to drawing board and read the upgrade guide again, moved etcd to v3.0, which safely started etcd.</p>
+
+<p>This brought us back to detection phase to check for etcd v2 store in current etcd v3 clusters (there were none).
+The upgrade process involved:
+1. v2.2 to v2.3
+1. v2.3 to v3.0
+1. v3.0 to v3.1 (surprisingly doesn’t panic)
+1. <a href="https://coreos.com/blog/migrating-applications-etcd-v3.html">Offline migration from v2 to v3 store</a>, because online migration was just too exciting.
+1. v3.1 to v3.2</p>
+
+<p>There was one problem with step 4. We had to shut down upstream application using etcd — in our case, Kubernetes (apiserver). Continuing my research came across the great following <a href="https://gravitational.com/blog/kubernetes-and-offline-etcd-upgrades/">blog</a>. It was time to whip out personal kubernetes cluster. The easiest approach I could find was having my personal <a href="https://github.com/Azure/acs-engine">acs engine</a> cluster with etcd v2 backend.</p>
+
+<p>I whipped out the following script for migration</p>
+
+<ol>
+<li>Check that etcd is healthy.</li>
+<li>Check to make sure etcd had no v3 keys (if yes error out)</li>
+<li>Backup v2 store</li>
+<li>Shutdown Kubernetes api server (disable manifests used by kubelet) on all masters</li>
+<li>Wait for etcd to converge raft indexes (could be easily done with etcdctl endpoint status)</li>
+<li>Shutdown etcd on all masters</li>
+<li>Run etcdctl migrate on all etcd cluster instances</li>
+<li>Start etcd on all masters</li>
+<li>Check etcd is healthy</li>
+<li>Backup v3 store</li>
+<li>Attach leases to keys in {ROOT}/events, i extracted required code to <a href="https://github.com/awesomenix/etcdattachlease">https://github.com/awesomenix/etcdattachlease</a></li>
+<li>Change — storage-backend from etcd2 to etcd3 option and start kubernetes api server</li>
+<li>Cleanup v2 store</li>
+</ol>
+
+<p>The script worked flawlessly in our test etcd clusters. I wish we could have used official <a href="https://github.com/kubernetes/kubernetes/tree/master/cluster/images/etcd">kubernetes etcd migration</a>, since it also has rollback support, but it didn’t fit our needs.</p>
+
+<h1 id="upgrade">Upgrade</h1>
+
+<p>Armed with solid script and successful testing of upgrading multiple private and test etcd clusters, I started official production upgrade process. Following safe deployment process (in our case upgrade), in order of small, medium, and large production regions. We quickly ran into a problem on 1 etcd clusters after 4 were upgraded. All kubelets flapped between Ready and NodeNotReady. A quick search revealed that kubernetes wasnt good at resolving conflicts in etcd, referenced in <a href="https://github.com/kubernetes/kubernetes/issues/58002">issue</a> and fixed by <a href="https://github.com/kubernetes/kubernetes/pull/63146">issue</a> in 1.9 and later. Since we were using 1.8, this wasn’t helpful at all. We caught this issue with our monitoring stack (kudos to excellent monitoring).
+Time to panic, since rolling back to v2 wasn’t easy. Also, we might have newer keys which needs to be migrated as well (which is handled cleanly in <a href="https://github.com/kubernetes/kubernetes/tree/master/cluster/images/etcd">https://github.com/kubernetes/kubernetes/tree/master/cluster/images/etcd</a>). In desperate times, you get some average good ideas.</p>
+
+<p>I quickly logged on to master:</p>
+
+<ul>
+<li>Shutdown kubernetes api server</li>
+<li>Backup v3 store on current etcd master</li>
+<li>Shutdown etcd on all master instances</li>
+<li>Copy over the backup to other slave instances</li>
+<li>Perform disaster recovery using v3 backup</li>
+<li>Start etcd on all master instances</li>
+<li>Start kubernetes api server</li>
+</ul>
+
+<p>This recovered Kubernetes cluster and the nodes stopped flapping states, in some instances required restarting kubelet to recover. Disaster averted. We faced similar issue on 3 other clusters as well, and above procedure got us back online within 10 mins. Success rate of 99.94%, I’d take that any day.</p>
+
+<h1 id="post-monitoring">Post-Monitoring</h1>
+
+<p>During the upgrade process we had monitoring for:</p>
+
+<ol>
+<li>Nodes getting into NotReady, which causes customers to be impacted due to kubernetes rescheduling pods regularly</li>
+<li>Customers getting affected during upgrades, any modifications to their stack might be affected</li>
+<li>Any other unexpected failures</li>
+</ol>
+
+<p>After successful fleet wide etcd upgrades, we opted to inspec, making sure our infrastructure is up-to-date and compliant when new services/stack is introduced.</p>
+
+<h1 id="conclusion">Conclusion</h1>
+
+<p>End this tale with a message, having solid monitoring will always help tackle any large production changes with high confidence.</p>
+
+
+		
+	</div>
+
+	<div class="pagination">
+
+		<a href="#" class="top">Top</a>
+	</div>
+</main>
+
+
+        		<footer>
+			<span>
+			&copy; <time datetime="2019-07-10 21:49:29.081849 -0700 PDT m=&#43;0.042784100">2019</time> . Made with <a href='https://gohugo.io'>Hugo</a> using the <a href='https://github.com/EmielH/tale-hugo/'>Tale</a> theme.
+			</span>
+		</footer>
+
+    </body>
+</html>

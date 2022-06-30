@@ -1,14 +1,10 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Categories on tales by a geek</title>
-    <link>https://awesomenix.github.io/categories/</link>
+    <link>https://awesomenix.dev/categories/</link>
     <description>Recent content in Categories on tales by a geek</description>
     <generator>Hugo -- gohugo.io</generator>
-    <language>en-us</language>
-    
-	<atom:link href="https://awesomenix.github.io/categories/index.xml" rel="self" type="application/rss+xml" />
-    
-    
+    <language>en-us</language><atom:link href="https://awesomenix.dev/categories/index.xml" rel="self" type="application/rss+xml" />
   </channel>
 </rss>
